@@ -2002,7 +2002,7 @@ BeamGroup.prototype.buildBeams = function(){
 									else if(subBm.fromNoteIndex == subBm.mainBeam.toNoteIndex){
 										subBm.flagDirIsLeft = true;
 									}
-									else{// Denne må skrives om til noteValue!!
+									else{
 										// Flagged note is NOT first or last in main beam
 										// Direction depends on "slot nr" in beamgroup, odd or even:
 										var ticksPos = this.voiceTicks[subBm.fromNoteIndex].staffTick.ticksPos - this.fromTick;
