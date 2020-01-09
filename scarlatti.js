@@ -19,6 +19,7 @@ var restsMaxNrDots = 2; // The maximum nr of dots on a rest.
 var stemW = spacingPx/30;
 var HIGHEST_UPSTEM_YPOS = 2.0;
 var BEAM_THICKNESS = 2/5;
+var wantedMeasPrSystem = 2;
 
 var staffs = [];
 var musicSystem; // The main score, all staffs combined
@@ -27,6 +28,16 @@ var itemImages = [imagesCount]; // All images of the notation items.
 var itemImagesInfo = [imagesCount]; // Scaling data etc.
 var systemMeasures = []; // All system measures
 var score; // The current active score
+
+//INPUT VARIABLES:
+var inputNoteValue = 6;
+var inputCurrentTicksPos = 0;
+var inputCurrentMeasNr = 0;
+var inputNoteNr;
+var inputOctaveOffset = 60;
+
+// Dictionary for note input via keyboard: keys = notename letters, value = noteNr in scale.
+var noteNamesToNr = { "c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11};
 
 // Table setting the Y axis offsets of the noteNr´s in a GClef.(noteRest.topY against top line in staff)
 //                      C   C#    D    Eb   E    F     F#    G   G#     A     Bb     B
@@ -43,6 +54,8 @@ var KEYS_Y_OFFSET = [[4, -0.5, 5, -0.75], [11, -2.5, 0, 0.75 ],[6, -1, 7, -1.25]
 
 var C_SCALE_FROM_CHROM = [0, 0.5, 1, 1.5, 2, 3, 3.5, 4, 4.5, 5, 5.5, 6];
 
+
+
 window.onload = function(){
 	canvas = document.createElement( 'canvas' );
 	context = canvas.getContext('2d');
@@ -50,50 +63,79 @@ window.onload = function(){
 
 	loadImgs();
 
-
-	// TESTING OF PURE MUSIC CONCEPT, all music kept in staff object, no bars/keys etc.
-	// Separation between pure music and visual elements
-	// Keysig, clef, timeSig, key are visual elements, do note change actual music.
 	score = new Score();
 	score.masterStaff = new MasterStaff();
 
 	score.masterStaff.insertKey(new Key(0, 0, 0)); // Key, QnotePos, ticksPos
 	score.masterStaff.insertTimeSignature(new TimeSignature(4,4, 0, 0)); // topNr, botNr, qNotePos, ticksPos
-	score.masterStaff.timeSigs[0].beamGroups = [Q_NOTE * 2, Q_NOTE * 2];
+	score.masterStaff.timeSigs[0].beamGroups = [Q_NOTE, Q_NOTE, Q_NOTE, Q_NOTE];
 
 	score.staffs[0] = new Staff(this.masterStaff);
 	score.staffs[0].insertClef(new Clef(50, 0, 0)); // clefNr, qNotePos, ticksPos
 
-	/*
-	score.appendMusic(new PureNoteRest([60], 1, 0),0); // noteNrArray, qNoteLength, ticksLength
-	score.appendMusic(new PureNoteRest([62], 1, 0),0);
-	score.appendMusic(new PureNoteRest([64], 1, 0),0);
-	score.appendMusic(new PureNoteRest([67], 1, 0),0);
-	score.appendMusic(new PureNoteRest([72], 4, 0),0);
-	*/
-
 	score.appendMeasures(33);
+
 
 	//NoteRest(isNote, noteNr)
 	//noteR, noteValue, dots, ticksPos, measureNr, staffNr, VoiceNr
-
-
-	score.addNoteRest(new NoteRest(true, 60), 4, 1, Q_NOTE * 0,  0, 0, 0);
-	score.addNoteRest(new NoteRest(true, 62), 3, 0, Q_NOTE * 3/8,  0, 0, 0);
-	score.addNoteRest(new NoteRest(true, 64), 4, 1, Q_NOTE * 4/8,  0, 0, 0);
-	score.addNoteRest(new NoteRest(true, 65), 3, 0, Q_NOTE * 7/8,  0, 0, 0);
-
+	//score.addNoteRest(new NoteRest(true, 60), 6, 0, Q_NOTE * 0,  0, 0, 0);
 
 	score.addPart();
 	score.parts[0].addPage();
 	for(var i = 0; i < score.systemMeasures.length; i++){
 		score.sendSysMeasureToParts(score.systemMeasures[i], 0);
 	}
-
 	score.updateMeasures(0, Q_NOTE * 100);
 	score.buildGraphic();
+
+	window.addEventListener("keydown", function(event){
+		handleKeyPressed(event);
+	});
+
 };
 
+
+
+var handleKeyPressed = function(event){
+	var validEntry = false;
+	var keyNr = event.key.charCodeAt(0);
+	console.log("Code: " + event.code + "  key: " + keyNr);
+	if(keyNr > 48 && keyNr < 58){
+		// Setting input noteLength:
+		inputNoteValue = keyNr - 48;
+		validEntry = true;
+	}
+	else if(event.key in noteNamesToNr){
+		handleInLineMusicInput(event);
+		validEntry = true;
+	}
+	else if(keyNr == 65){
+		console.log("Piltast!");
+
+	}
+};
+
+var handleInLineMusicInput = function(){
+	var prevInputNoteNr = inputNoteNr;
+	inputNoteNr = inputOctaveOffset + noteNamesToNr[event.key];
+	if(inputNoteNr - prevInputNoteNr < -6){
+		inputNoteNr += 12;
+		inputOctaveOffset += 12;
+	}
+	else if(inputNoteNr - prevInputNoteNr > 6){
+		inputNoteNr -= 12;
+		inputOctaveOffset -= 12;
+	}
+	score.addNoteRest(new NoteRest(true, inputNoteNr), inputNoteValue, 0, inputCurrentTicksPos,  inputCurrentMeasNr, 0, 0);
+	score.updateMeasures(0, Q_NOTE * 100);
+	score.buildGraphic();
+	inputCurrentTicksPos += Q_NOTE / Math.pow(2, 6 - inputNoteValue);
+	if(inputCurrentTicksPos >= Q_NOTE * 4){
+		inputCurrentTicksPos = 0;
+		inputCurrentMeasNr += 1;
+	}
+	render(true);
+};
 
 var loadImgs = function(){
 	var i;
@@ -176,6 +218,7 @@ var viewResize = function(redraw){
 
 var render = function(redraw){
 	context.scale(drawScale, drawScale);
+	if(redraw){ context.clearRect(0, 0, width, height); }
 	score.render();
 	context.strokeStyle = "black";
 	context.font = "10px Baskerville";
@@ -393,7 +436,7 @@ var System = function(page){
 };
 
 System.prototype.receiveSysMeasure = function(sysMeasure, sysMeasureNr){
-	if(this.systemMeasures.length < 2){
+	if(this.systemMeasures.length < wantedMeasPrSystem){
 		this.systemMeasures.push(sysMeasure);
 		if(this.systemMeasures.length == 1){
 			this.systemMeasures[this.systemMeasures.length - 1].setShowInitKey(true);
@@ -745,6 +788,7 @@ var Staff_Measure = function(topMeter, bottomMeter, key, clefNr, staff, systemMe
 	this.updateNoteToYPosTable();
 
 	this.voiceBeamGroups = []; // A beamgroup is a potential 8th note beam. The groups are according to the time signature.
+	this.findGapsInVoices();
 };
 
 Staff_Measure.prototype.updateCScaleSteps = function(){
@@ -787,6 +831,7 @@ Staff_Measure.prototype.updateNoteToYPosTable = function(){
 // Inserting a note or rest. ticksFromStart = ticks from start of bar.
 // var NoteRest = function(isNote, noteNr){
 Staff_Measure.prototype.addNoteRest = function(noteRest, noteValue, dots, ticksPos, voiceNr){
+	this.createTimeGapInVoice(noteValue, dots, ticksPos, voiceNr);
 	var i;
 	if(this.staffTicks.length == 0 || ticksPos > this.staffTicks[this.staffTicks.length-1].ticksPos){
 		this.staffTicks.push(new StaffTick(ticksPos));
@@ -805,6 +850,45 @@ Staff_Measure.prototype.addNoteRest = function(noteRest, noteValue, dots, ticksP
 			}
 		}
 	}
+	//this.findGapsInVoices();
+};
+
+Staff_Measure.prototype.addNoteRestTicksLength = function(isNote, noteNr, ticksLength, ticksPos, voiceNr){
+	// This method inserts one or more noteRests based on the ticksLength.
+	// Inserts several noteRests after one another if neccessary (tied if notes)
+	// Adapts notelengths to Beamgroups
+	// Calls next staff_measure if crossing barline.
+	var lastTick = ticksPos + ticksLength - 1;
+	var noteValues = [];
+	var ticksPositions = [];
+	var infLoopBreaker = 0;
+	var ticksNewPos = ticksPos;
+
+	while(ticksLength > 0){
+		infLoopBreaker += 1;
+		noteValues.push(noteValueFromTicks(ticksLength));
+		ticksPositions.push(ticksNewPos);
+		ticksNewPos += ticksLength;
+		ticksLength = noteValues[noteValues.length - 1].remainder;
+		if(infLoopBreaker > 1000){ alert("ERROR in addNoteR W Ticks"); break; }
+	}
+	var nv;
+	for(i = noteValues.length - 1; i >= 0; i--){
+		nv = noteValues[i];
+		this.addNoteRest(new NoteRest(isNote, noteNr), nv.noteValue, nv.dots, ticksPositions[i], voiceNr);
+	}
+
+};
+
+Staff_Measure.prototype.findVoiceBeamGroupAtTicksPos = function(voiceNr, ticksPos){
+	var tempBG;
+	for(i = 0; i < this.voiceBeamGroups[voiceNr].length; i++){
+		tempBG = this.voiceBeamGroups[voiceNr][i];
+		if(tempBG.fromTick <= ticksPos && tempBG.toTick > ticksPos){
+			return tempBG;
+		}
+	}
+	return undefined;
 };
 
 Staff_Measure.prototype.addTmpAcc = function(tmpA){
@@ -826,6 +910,9 @@ Staff_Measure.prototype.addTmpAcc = function(tmpA){
 Staff_Measure.prototype.buildGraphic = function(){
 	this.pitchOffset = itemImagesInfo[this.clefNr].param1;
 	this.keyOffset = itemImagesInfo[this.clefNr].param2;
+
+	// Clearing before rebuilding:
+	this.graph_items = [];
 
 	// Adding initial clef
 	if(this.showInitClef){
@@ -1005,20 +1092,6 @@ Staff_Measure.prototype.buildGraphic = function(){
 
 	// Building the beams:
 	this.buildBeams();
-
-	/*
-	//testing the beams:
-	alert("TEST: Antall beamgrupper er nå " + this.voiceBeamGroups[0].length);
-	for(var ix = 0; ix < this.voiceBeamGroups[0].length; ix++){
-		alert("Test, antall beamGrupper: " + this.voiceBeamGroups[0].length);
-		for(var ix2 = 0; ix2 < this.voiceBeamGroups[0][ix].beams.length; ix2++){
-			var beam = this.voiceBeamGroups[0][ix].beams[ix2];
-			var antVTicks = beam.voiceTicks.length;
-			alert("Test, beamgruppe: " + ix + " beamNr: " + ix2 + " antVTicks: " + antVTicks);
-		}
-
-	}
-	*/
 };
 
 // This method sets the correct x position of notes in a voice tick.
@@ -1127,6 +1200,148 @@ Staff_Measure.prototype.buildBeams = function(){
 	}
 };
 
+// Creates a time gap in a voice in order to overwrite with a new voiceTick:
+Staff_Measure.prototype.createTimeGapInVoice = function(noteValue, dots, ticksPos, voiceNr){
+	//console.log("createTimeGapInVoice");
+	var toTick;
+	if(noteValue == 99){
+		toTick = this.totalTicks - 1;
+	}
+	else{
+			var toTick = ticksPos + ticksFromNoteValueDots(noteValue, dots) - 1;
+	}
+	var staffTick, voiceTick, vtEndTick;
+	// Checking if overlapping voiceTicks exists,
+	for(var staffTickIx = 0; staffTickIx < this.staffTicks.length; staffTickIx++){
+		//console.log("staffTicksIx = " + staffTickIx);
+		staffTick = this.staffTicks[staffTickIx];
+		//console.log("voiceTicks.length: " + staffTick.voiceTicks.length);
+		if(staffTick.voiceTicks.length > voiceNr && staffTick.voiceTicks[voiceNr] != undefined){
+			//console.log("Vi har en voiceTick!");
+			voiceTick = staffTick.voiceTicks[voiceNr];
+			if(voiceTick.noteValue == 99){
+				vtEndTick = this.totalTicks - 1;
+			}
+			else{
+					vtEndTick = staffTick.ticksPos + ticksFromNoteValueDots(voiceTick.noteValue, voiceTick.dots) - 1;
+			}
+			console.log("Ny fromTick: " + ticksPos + " Ny to: " + toTick +
+									"gml fra: " + staffTick.ticksPos + " til: " + vtEndTick +
+									"ny verdi:" + noteValue + " gml verdi " + voiceTick.noteValue);
+			if(staffTick.ticksPos >= ticksPos && vtEndTick <= toTick){
+				console.log("Old voiceTick is inside gap: remove old!");
+				staffTick.voiceTicks[voiceNr] = undefined;
+				var empty = true;
+				for(var i = 0; i < staffTick.voiceTicks.length; i++){
+					if(staffTick.voiceTicks[i] != undefined){ empty = false; break; }
+				}
+				if(empty){ this.staffTicks.splice(staffTickIx, 1); }
+			}
+			else if(staffTick.ticksPos < ticksPos && vtEndTick >= ticksPos && vtEndTick <= toTick){
+				console.log("End only of old voiceTick is inside the gap: Shorten.");
+			}
+			else if(staffTick.ticksPos >= ticksPos && staffTick.ticksPos <= toTick && vtEndTick > toTick){
+				console.log("Beginning only of old vt is inside gap: move and shorten.");
+				var noteRest;
+				for(var i = 0; i < voiceTick.noteRests.length; i++){
+					noteRest = voiceTick.noteRests[i];
+					this.addNoteRestTicksLength(noteRest.isNote, noteRest.noteNr, vtEndTick - toTick, toTick, voiceNr);
+					console.log("Addet med ticksLength: fra tick: " + toTick + 1);
+				}
+				// Removing old voiceTick, and staffTick if empty:
+				staffTick.voiceTicks[voiceNr] = undefined;
+				var empty = true;
+				for(var i = 0; i < staffTick.voiceTicks.length; i++){
+					if(staffTick.voiceTicks[i] != undefined){ empty = false; break; }
+				}
+				if(empty){ this.staffTicks.splice(staffTickIx, 1); }
+			}
+			else if(ticksPos > staffTick.ticksPos && toTick < vtEndTick){
+				console.log("Gap is inside old Vt: Shorten, copy/move/adjust length.");
+			}
+
+		}
+	}
+};
+
+Staff_Measure.prototype.findStaffTickAtTick = function(ticksPos){
+	var tmpStaffTick;
+	for(var i = 0; i < this.staffTicks.length; i++){
+		tmpStaffTick = this.staffTicks[i];
+		if(tmpStaffTick.ticksPos == ticksPos){
+			return tmpStaffTick;
+		}
+		else{
+			if(tmpStaffTick.ticksPos > ticksPos){ break; }
+		}
+	}
+	return undefined;
+};
+
+// This method finds gaps in the voice which should be filled with rests:
+Staff_Measure.prototype.findGapsInVoices = function(){
+	if(this.staffTicks.length == 0){
+		this.fillVoiceGapWithRest(0, 0, this.totalTicks);
+	}
+	else{
+		var staffTick, voiceTick, ticksGapStart, ticksGapEnd;
+		for(var voiceIx = 0; voiceIx < this.noOfVoices; voiceIx++){
+			ticksGapStart = 0; ticksGapEnd = 0;
+			for(var staffTickIx = 0; staffTickIx < this.staffTicks.length; staffTickIx++){
+				staffTick = this.staffTicks[staffTickIx];
+				if(staffTick.voiceTicks.length >= voiceIx + 1){
+					ticksGapEnd = staffTick.ticksPos;
+					if(ticksGapEnd - ticksGapStart > 0){
+						this.fillVoiceGapWithRest(voiceIx, ticksGapStart, ticksGapEnd);
+						//console.log("Fill w v gaps requested from " + ticksGapStart + " to " + ticksGapEnd);
+					}
+					voiceTick = staffTick.voiceTicks[voiceIx];
+					ticksGapStart = ticksGapEnd + Q_NOTE * Math.pow(2, 6 - voiceTick.noteValue);
+				}
+			}
+		}
+	}
+
+};
+
+Staff_Measure.prototype.fillVoiceGapWithRest = function(voiceNr, ticksStart, ticksEndExclusive){
+	if(ticksStart == 0 && ticksEndExclusive == this.totalTicks){
+		this.addNoteRest(new NoteRest(false, 71), 99, 0, 0, 0);
+	}
+	else{
+		// Finn pauseverdier som tilsammen fyller gap.
+		// Sett inn minste verdier først, deretter større.
+		// Pauser deles opp iht beamgrupper
+		var firstBeamGroupIx, lastBeamGroupIx, tempBG;
+		for(var i = 0; i < this.voiceBeamGroups[voiceNr].length; i++ ){
+			tempBG = this.voiceBeamGroups[voiceNr][i];
+			//console.log("fillWithRests, i: " + i + ", tempBG from vt: " + tempBG.fromTick + " to: " + tempBG.toTick);
+			if(ticksStart >= tempBG.fromTick && ticksStart <= tempBG.toTick){
+				firstBeamGroupIx = i;
+			}
+			if(ticksEndExclusive >= tempBG.fromTick && ticksEndExclusive <= tempBG.toTick){
+				lastBeamGroupIx = i;
+				break;
+			}
+		}
+		if(firstBeamGroupIx == lastBeamGroupIx){
+			// Pause = end - start.
+			//OBS: Beamgrupper kan være lengre enn punktert helpause.(?)
+
+		}
+		else{
+			// First: Pause fra startTick til ut gruppen.
+			for(var i = firstBeamGroupIx + 1; i <= lastBeamGroupIx - 1; i++){
+				// pause hele beamGruppen
+			}
+			// Siste: pause fram til endTick
+		}
+
+
+	}
+		//this.addNoteRest(noteRest, noteValue, dots, ticksStart, voiceNr);
+};
+
 
 // RND
 // leftX,topX indicates the point where the start of the upper staffline is.
@@ -1195,40 +1410,6 @@ Staff_Measure.prototype.render = function(leftX, topY, width, redraw){
 			voiceTick = staffTick.voiceTicks[voiceTickIx];
 			for(var noteRestIx = 0; noteRestIx < voiceTick.noteRests.length; noteRestIx++){
 				noteRest = voiceTick.noteRests[noteRestIx];
-				//alert("Rendering noteRest noteNr: " + noteRest.noteNr);
-
-
-				// Filling in with rests if gap in music:
-				/*
-				ticksGap = 0
-				if(noteRestIx == 0){
-					// Rendering of initial rest in measure:
-					ticksGap = staffTick..ticksPos;
-					if(ticksGap > 0){
-						var ticksRemainingRest = this.renderRest(ticksGap, innerLeftX, topY + 2* spacingPx);
-					}
-				}
-				else{
-					// Rendering of in-between rests in measure:
-					ticksGap = staffTicks.ticksPos - (prevStaffTick.ticksPos + prevStaffTick.ticksLength);
-					if(ticksGap > 0){
-						ticksGapPosX = prevNoteRest.ticksPos + prevNoteRest.ticksLength;
-						var restPosXPx = innerLeftX + (innerWidth / this.totalTicks) * ticksGapPosX;
-						var ticksRemainingrest = this.renderRest(ticksGap, restPosXPx, topY + 2 * spacingPx);
-					}
-				}
-
-				if(noteRestIx == this..length - 1){
-					// Rendering of ending rests in measure:
-					ticksGap = this.totalTicks - (noteRest.ticksPos + noteRest.ticksLength);
-					if(ticksGap > 0){
-						//alert("Ticksgap fra siste note: " + ticksGap);
-						ticksGapPosX = noteRest.ticksPos + noteRest.ticksLength;
-						var restPosXPx = innerLeftX + (innerWidth / this.totalTicks) * ticksGapPosX;
-						var remainingRest = this.renderRest(ticksGap, restPosXPx, topY + 2 * spacingPx);
-					}
-				}
-				*/
 
 				var notePosX = innerLeftX + (innerWidth / this.totalTicks) * staffTick.ticksPos;
 
@@ -1254,8 +1435,6 @@ Staff_Measure.prototype.render = function(leftX, topY, width, redraw){
 				// Notes between scale steps is has notPosValue of *.5.
 				// Actual step is beeing calculated along with accidentals below
 				if(noteRest.isNote){
-
-
 
 					// noteRest is a note, NOT a rest:
 					// Rendering the stem:
@@ -1294,14 +1473,18 @@ Staff_Measure.prototype.render = function(leftX, topY, width, redraw){
 				}
 				else{
 					// noteRest is a rest:
+					this.renderRest(voiceTick.noteValue, voiceTick.dots, notePosX, notePosY, innerLeftX, innerWidth);
+
+					/*
 					if(voiceTick.noteValue >= 7){
 						if(voiceTick.noteValue >= 8){
-							context.fillRect(innerLeftX + innerWidth/2 - spacingPx / 2, topY + spacingPx, spacingPx, spacingPx / 2);
+
 						}
 						else{
 							context.fillRect(notePosX, topY + spacingPx * 1.5, spacingPx, spacingPx / 2);
 						}
 					}
+					*/
 				}
 
 				var prevNoteRest = noteRest;
@@ -1320,11 +1503,14 @@ Staff_Measure.prototype.render = function(leftX, topY, width, redraw){
 		}
 	}
 
+	/*
 	// Filling in with bar rests:
 	if(this.staffTicks.length == 0){
 		context.fillRect(innerLeftX + innerWidth/2 - spacingPx / 2, topY + spacingPx, spacingPx, spacingPx / 2);
 	}
+	*/
 	this.renderBeamsFlagsStems();
+
 };
 
 Staff_Measure.prototype.renderBeamsFlagsStems = function(){
@@ -1336,69 +1522,72 @@ Staff_Measure.prototype.renderBeamsFlagsStems = function(){
 		var vt;
 		for(var vtIx = 0; vtIx < staffTick.voiceTicks.length; vtIx++){
 			vt = staffTick.voiceTicks[vtIx];
-			//alert(vt.isBeamed);
-			if(!vt.isBeamed && vt.noteValue < 8){
+			if(vt.noteRests[0].isNote){
+				//alert(vt.isBeamed);
+				if(!vt.isBeamed && vt.noteValue < 8){
 
-				// Setting stemDir;
-				if(vt.forcedStemDir != 0){
-					stemDir = vt.forcedStemDir;
-				}
-				else{
-					if(staffTick.voiceTicks.length > 1){
-						// More than one voice, stemDir set by voiceNr
-						if(vtIx % 2 != 0){ stemDir = 1; } else{ stemDir = -1;  }
+					// Setting stemDir;
+					if(vt.forcedStemDir != 0){
+						stemDir = vt.forcedStemDir;
 					}
 					else{
-						if(vt.avgYpos >= HIGHEST_UPSTEM_YPOS){
-							stemDir = -1;
+						if(staffTick.voiceTicks.length > 1){
+							// More than one voice, stemDir set by voiceNr
+							if(vtIx % 2 != 0){ stemDir = 1; } else{ stemDir = -1;  }
 						}
 						else{
-						//	alert(vt.avgYpos);
-							stemDir = 1;
+							if(vt.avgYpos >= HIGHEST_UPSTEM_YPOS){
+								stemDir = -1;
+							}
+							else{
+							//	alert(vt.avgYpos);
+								stemDir = 1;
+							}
 						}
 					}
-				}
-				var rootNote, spanNote, stemXpx, stemYstartPx;
-				//stem is rooted in rootNotem The spanNote is the other extreme of the voiceTick.
-				if(stemDir < 0){
-					rootNote = vt.noteRests[0];
-					spanNote = vt.noteRests[vt.noteRests.length - 1];
-					var rootInfo = itemImagesInfo[rootNote.imgNr];
-					stemXpx = rootNote.XposPx + rootInfo.param2 * spacingPx;
-					stemYstartPx = rootNote.YposPx + rootInfo.param4 * spacingPx;
-				}
-				else{
-					rootNote = vt.noteRests[vt.noteRests.length - 1];
-					spanNote = vt.noteRests[0];
-					var rootInfo = itemImagesInfo[rootNote.imgNr];
-					stemXpx = rootNote.XposPx + rootInfo.param1 * spacingPx;
-					stemYstartPx = rootNote.YposPx + rootInfo.param3 * spacingPx;
+					var rootNote, spanNote, stemXpx, stemYstartPx;
+					//stem is rooted in rootNotem The spanNote is the other extreme of the voiceTick.
+					if(stemDir < 0){
+						rootNote = vt.noteRests[0];
+						spanNote = vt.noteRests[vt.noteRests.length - 1];
+						var rootInfo = itemImagesInfo[rootNote.imgNr];
+						stemXpx = rootNote.XposPx + rootInfo.param2 * spacingPx;
+						stemYstartPx = rootNote.YposPx + rootInfo.param4 * spacingPx;
+					}
+					else{
+						rootNote = vt.noteRests[vt.noteRests.length - 1];
+						spanNote = vt.noteRests[0];
+						var rootInfo = itemImagesInfo[rootNote.imgNr];
+						console.log("stIx: " + stIx + "rootNote: " + rootNote.isNote + " noteNr: " + rootNote.noteNr + "ticksPos: " + staffTick.ticksPos);
+						stemXpx = rootNote.XposPx + rootInfo.param1 * spacingPx;
+						stemYstartPx = rootNote.YposPx + rootInfo.param3 * spacingPx;
 
-				}
+					}
 
-				//Setting stemlength unbeamed notes
-				var stemLength = 3;
-				if(spanNote.Ypos < -2 && stemDir > 0){
-					stemLength += (-1 * (spanNote.Ypos + 2));
-				}
-				else if(spanNote.Ypos > 5 && stemDir < 0){
-					stemLength += (spanNote.Ypos - 5);
-				}
+					//Setting stemlength unbeamed notes
+					var stemLength = 3;
+					if(spanNote.Ypos < -2 && stemDir > 0){
+						stemLength += (-1 * (spanNote.Ypos + 2));
+					}
+					else if(spanNote.Ypos > 5 && stemDir < 0){
+						stemLength += (spanNote.Ypos - 5);
+					}
 
-				var stemYendPx = spanNote.YposPx + stemDir * stemLength * spacingPx;
-				if(stemDir > 0) stemYendPx += spacingPx;
-				if(stemW < 1){ stemW = 1; };
+					var stemYendPx = spanNote.YposPx + stemDir * stemLength * spacingPx;
+					if(stemDir > 0) stemYendPx += spacingPx;
+					if(stemW < 1){ stemW = 1; };
 
-				// Drawing stem unbeamed notes:
-				context.lineWidth = stemW;
-				context.beginPath();
-				context.moveTo(stemXpx, stemYstartPx);
-				context.lineTo(stemXpx, stemYendPx);
-				context.stroke();
+					// Drawing stem unbeamed notes:
+					context.lineWidth = stemW;
+					context.beginPath();
+					context.moveTo(stemXpx, stemYstartPx);
+					context.lineTo(stemXpx, stemYendPx);
+					context.stroke();
 
-				var stemYspanPx = spanNote.YposPx - (0.5 * stemDir * spacingPx)
-				if(vt.noteValue < 6){
-					this.renderFlags(vt.noteValue, stemXpx, stemYspanPx, stemYendPx - stemYspanPx);
+					var stemYspanPx = spanNote.YposPx - (0.5 * stemDir * spacingPx)
+					if(vt.noteValue < 6){
+						this.renderFlags(vt.noteValue, stemXpx, stemYspanPx, stemYendPx - stemYspanPx);
+					}
 				}
 			}
 		}
@@ -1670,16 +1859,16 @@ Staff_Measure.prototype.renderFlags = function(noteValue, stemRootXPx, stemRootY
 	}
 };
 
-Staff_Measure.prototype.renderRest = function(noteValue, dots, posXPx, posYPx){
-	// The function attempts to get as close as possible to the received length value.
-	// If the rest musit be written as two separate rests the function returns the
-	// excess value.
-
-	if(noteValue == 8){
-		context.fillRect(posXPx, topY + spacingPx, spacingPx, spacingPx / 2);
+Staff_Measure.prototype.renderRest = function(noteValue, dots, posXPx, posYPx, innerLeftXPx, innerWidthPx){
+	if(noteValue == 99){
+		context.fillRect(innerLeftXPx + innerWidthPx/2 - spacingPx / 2, posYPx + 0.5 * spacingPx, spacingPx, spacingPx / 2);
 	}
-	else if(noteValue == 4){
+	else if(noteValue == 8){
+		context.fillRect(posXPx, posYPx + 0.5 * spacingPx, spacingPx, spacingPx / 2);
+	}
+	else if(noteValue == 7){
 		context.fillRect(posXPx, posYPx, spacingPx, spacingPx / 2);
+		context.stroke();
 	}
 	else if(noteValue == 6){
 		renderImage(4, posXPx, posYPx);
@@ -1738,7 +1927,6 @@ Staff_Measure.prototype.renderRest = function(noteValue, dots, posXPx, posYPx){
 			context.fill();
 			context.stroke();
 
-
 					// Drawing the connection between ellipse and stem:
 			context.moveTo(ellipseXPx + spacingPx * 0.26, ellipseYPx + spacingPx * 0.1);
 			context.bezierCurveTo(ellipseXPx + spacingPx * 0.26, ellipseYPx + spacingPx * 0.1,
@@ -1754,19 +1942,13 @@ Staff_Measure.prototype.renderRest = function(noteValue, dots, posXPx, posYPx){
 			context.fill();
 			context.stroke();
 
-
 			//context.lineTo(stemTopL
 			ellipseBranchUpperXPx -= spacingPx * (1 / stemTiltFactor);;
 			ellipseBranchUpperYPx += spacingPx;
 			ellipseXPx -= spacingPx * (1/stemTiltFactor);
 			ellipseYPx += spacingPx;
-
 		}
-
 	}
-
-
-	return remainingLength;
 };
 
 var ItemImgInfo = function(scale, whFactor, xBias, yBias){
@@ -1902,7 +2084,6 @@ StaffTick.prototype.addNoteRest = function(noteRest, noteValue, dots, voiceNr){
 // It is responsible for stem, beams/flag and articulation.
 VoiceTick = function(staffTick, noteValue, dots){
 	this.staffTick = staffTick;
-	//this.ticksLength = ticksLength// Denne må skrives om til noteValue!!;
 	this.noteValue = noteValue; // 2 = whole Note, 3 = half, 4 = quarter (Dorico)
 	this.dots = dots; // no of dots
 	this.noteRests = [];
@@ -2106,4 +2287,29 @@ Beam.prototype.calcPositions = function(){
 	this.avgYpos /= (this.toNoteIndex - this.fromNoteIndex);
 
 	if(this.fromNoteIndex == this.toNoteIndex){ this.isFlag = true; }
+};
+
+// GLOBAL HELPER FUNCTIONS:
+
+// Tries to match the given ticks to a corresponding note value including dots.
+// If impossible: Returns the remainding ticks.
+// Returns a dictionary with noteValue: dots:  and ticksRemaining:
+var noteValueFromTicks = function(ticksLength){
+	var noteValue = Math.floor(Math.log2(ticksLength/Q_NOTE) + 6);
+	var remainder = ticksLength - this.ticksFromNoteValueDots(noteValue, 0);
+	//console.log("Remaining before dot:" + remainder + " remainder/noteTicsk=" + remainder / this.ticksFromNoteValueDots(noteValue, 0) );
+	var dots = 0;
+	if(remainder >= ticksLength / 4 && remainder < ticksLength){
+		var dots = -1 * Math.floor(Math.log2(1 - (remainder / this.ticksFromNoteValueDots(noteValue, 0))));
+	}
+	if( dots > 0){ remainder -= ticksFromNoteValueDots(noteValue - 1, dots -1); }
+	//console.log("noteV from Tx: " + ticksLength + " = " + "  noteValue: " + noteValue + "  dots: " + dots + "  r: " + remainder);
+	//console.log("ticks from noteValue and dots = " + ticksFromNoteValueDots(noteValue, dots));
+	return { "noteValue": noteValue, "dots": dots, "remainder": remainder };
+};
+
+var ticksFromNoteValueDots = function(noteValue, dots){
+	var ticks = Q_NOTE / Math.pow(2, 6 - noteValue);
+	ticks += ticks * (1 - Math.pow(2, 0 - dots));
+	return ticks;
 };
