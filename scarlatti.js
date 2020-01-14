@@ -1,6 +1,6 @@
 /*
  * Scarlatti Notation
- * Copyright Hallgrim Bratberg 2019
+ * Copyright Hallgrim Bratberg 2020
  * */
 
 // Set TAB = 4 spaces for comment alignment
@@ -21,6 +21,8 @@ var HIGHEST_UPSTEM_YPOS = 2.0;
 var BEAM_THICKNESS = 2/5;
 var wantedMeasPrSystem = 2;
 
+var MAX_DOTS = 1;
+
 var staffs = [];
 var musicSystem; // The main score, all staffs combined
 var imagesCount = 100; // The number of images
@@ -35,6 +37,10 @@ var inputCurrentTicksPos = 0;
 var inputCurrentMeasNr = 0;
 var inputNoteNr;
 var inputOctaveOffset = 60;
+
+//UNDO:
+//historyStack stores every action
+var historyStack = []
 
 // Dictionary for note input via keyboard: keys = notename letters, value = noteNr in scale.
 var noteNamesToNr = { "c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11};
@@ -111,7 +117,9 @@ var handleKeyPressed = function(event){
 	}
 	else if(keyNr == 65){
 		console.log("Piltast!");
-
+	}
+	else if(keyNr == 122){
+		undo();
 	}
 };
 
@@ -126,7 +134,11 @@ var handleInLineMusicInput = function(){
 		inputNoteNr -= 12;
 		inputOctaveOffset -= 12;
 	}
-	score.addNoteRest(new NoteRest(true, inputNoteNr), inputNoteValue, 0, inputCurrentTicksPos,  inputCurrentMeasNr, 0, 0);
+	nr = new NoteRest(true, inputNoteNr);
+	score.addNoteRest(nr, inputNoteValue, 0, inputCurrentTicksPos,  inputCurrentMeasNr, 0, 0);
+	historyStack.push({"subject": score, "action": "addNoteRest", "object": nr,
+										 "noteValue": inputNoteValue, "ticksPos": inputCurrentTicksPos,
+									 	 "measNr": inputCurrentMeasNr});
 	score.updateMeasures(0, Q_NOTE * 100);
 	score.buildGraphic();
 	inputCurrentTicksPos += Q_NOTE / Math.pow(2, 6 - inputNoteValue);
@@ -156,7 +168,7 @@ var loadImgs = function(){
 	itemImagesInfo[1].param3 = 0.6; // stemY left offset from note upperY
 	itemImagesInfo[1].param4 = 0.35; // stemY right offset from note upperY
 	setImage(2, "images/WholeNote.svg", new ItemImgInfo(1,1.7, 0, 0));
-	setImage(4, "images/Crotchet_rest_alt_plain-svg.svg", new ItemImgInfo(3, 0.32, 0.3, -1.5));
+	setImage(4, "images/Crotchet_rest_alt_plain-svg.svg", new ItemImgInfo(3, 0.32, 0.3, -0.75));
 	//setImage(10, "images/UpSingleFlag.svg", new ItemImgInfo(3,0.3 , 1.1,0.4));
 	//setImage(11, "images/DownSingleFlag.svg", new ItemImgInfo(3, 0.3, 0, -2 ));
 	setImage(20, "images/Sharp.svg", new ItemImgInfo(2.8, 0.3, 0, -0.8));
@@ -585,7 +597,7 @@ SystemMeasure.prototype.render = function(leftX, topY, width, redraw){
 };
 
 SystemMeasure.prototype.addNoteRest = function(noteRest, noteValue, dots, ticksPos, staffNr, voiceNr){
-	this.staffMeasures[staffNr].addNoteRest(noteRest, noteValue, dots, ticksPos, voiceNr);
+	this.staffMeasures[staffNr].addNoteRest(noteRest, noteValue, dots, ticksPos, voiceNr, true);
 };
 
 
@@ -830,18 +842,19 @@ Staff_Measure.prototype.updateNoteToYPosTable = function(){
 
 // Inserting a note or rest. ticksFromStart = ticks from start of bar.
 // var NoteRest = function(isNote, noteNr){
-Staff_Measure.prototype.addNoteRest = function(noteRest, noteValue, dots, ticksPos, voiceNr){
-	this.createTimeGapInVoice(noteValue, dots, ticksPos, voiceNr);
+Staff_Measure.prototype.addNoteRest = function(noteRest, noteValue, dots, ticksPos, voiceNr, createTimeGap){
+	if(createTimeGap){ this.createTimeGapInVoice(noteValue, dots, ticksPos, voiceNr) };
 	var i;
 	if(this.staffTicks.length == 0 || ticksPos > this.staffTicks[this.staffTicks.length-1].ticksPos){
-		this.staffTicks.push(new StaffTick(ticksPos));
-		this.staffTicks[this.staffTicks.length-1].addNoteRest(noteRest, noteValue, dots, voiceNr);
+		var st = new StaffTick(ticksPos);
+		this.staffTicks.push(st);
+		st.addNoteRest(noteRest, noteValue, dots, voiceNr);
 	}
 	else{
 		for(i = 0; i < this.staffTicks.length; i++){
 			if(ticksPos <  this.staffTicks[i].ticksPos){
-
-				this.staffTicks.splice(i, 0, new StaffTick(ticksPos));
+				var st = new StaffTick(ticksPos);
+				this.staffTicks.splice(i, 0, st);
 				this.staffTicks[i].addNoteRest(noteRest, noteValue, dots, voiceNr);
 				break;
 			}
@@ -851,6 +864,7 @@ Staff_Measure.prototype.addNoteRest = function(noteRest, noteValue, dots, ticksP
 		}
 	}
 	//this.findGapsInVoices();
+	console.log("historyStack.length: " + historyStack.length);
 };
 
 Staff_Measure.prototype.addNoteRestTicksLength = function(isNote, noteNr, ticksLength, ticksPos, voiceNr){
@@ -858,26 +872,42 @@ Staff_Measure.prototype.addNoteRestTicksLength = function(isNote, noteNr, ticksL
 	// Inserts several noteRests after one another if neccessary (tied if notes)
 	// Adapts notelengths to Beamgroups
 	// Calls next staff_measure if crossing barline.
+
 	var lastTick = ticksPos + ticksLength - 1;
 	var noteValues = [];
-	var ticksPositions = [];
 	var infLoopBreaker = 0;
-	var ticksNewPos = ticksPos;
 
 	while(ticksLength > 0){
 		infLoopBreaker += 1;
 		noteValues.push(noteValueFromTicks(ticksLength));
-		ticksPositions.push(ticksNewPos);
-		ticksNewPos += ticksLength;
 		ticksLength = noteValues[noteValues.length - 1].remainder;
-		if(infLoopBreaker > 1000){ alert("ERROR in addNoteR W Ticks"); break; }
+		if(infLoopBreaker > 1000){ alert("**ERROR in addNoteR W Ticks**"); break; }
 	}
+
 	var nv;
 	for(i = noteValues.length - 1; i >= 0; i--){
 		nv = noteValues[i];
-		this.addNoteRest(new NoteRest(isNote, noteNr), nv.noteValue, nv.dots, ticksPositions[i], voiceNr);
+		this.addNoteRest(new NoteRest(isNote, noteNr), nv.noteValue, nv.dots, ticksPos, voiceNr, false);
+		//console.log("Addet med ticksLength: fra tick: " + ticksPos + " lengde: " + nv.noteValue + "Dots:" + nv.dots + " Er Note: " + isNote);
+		ticksPos += ticksFromNoteValueDots(nv.noteValue, nv.dots);
 	}
+};
 
+
+Staff_Measure.prototype.removeNoteRest = function(noteRest, ticksPos, voiceNr){
+	var staffTick, voiceTick;
+	for(var staffTickIx = 0; staffTickIx < this.staffTicks.length; staffTickIx++){
+		staffTick = this.staffTicks[staffTickIx];
+		if(staffTick.ticksPos == ticksPos){
+			staffTick.removeNoteRest(noteRest, voiceNr);
+			var empty = true;
+			for(var i = 0; i < staffTick.voiceTicks.length; i++){
+				if(staffTick.voiceTicks[i] != undefined){ empty = false; break;}
+			}
+			if(empty){ this.staffTicks.splice(i, 1); }
+		}
+		else if(staffTick.ticksPos > ticksPos){ break; }
+	}
 };
 
 Staff_Measure.prototype.findVoiceBeamGroupAtTicksPos = function(voiceNr, ticksPos){
@@ -1225,11 +1255,11 @@ Staff_Measure.prototype.createTimeGapInVoice = function(noteValue, dots, ticksPo
 			else{
 					vtEndTick = staffTick.ticksPos + ticksFromNoteValueDots(voiceTick.noteValue, voiceTick.dots) - 1;
 			}
-			console.log("Ny fromTick: " + ticksPos + " Ny to: " + toTick +
-									"gml fra: " + staffTick.ticksPos + " til: " + vtEndTick +
-									"ny verdi:" + noteValue + " gml verdi " + voiceTick.noteValue);
+			//console.log("Ny fromTick: " + ticksPos + " Ny to: " + toTick +
+			//						"gml fra: " + staffTick.ticksPos + " til: " + vtEndTick +
+			//						"ny verdi: " + noteValue + " gml verdi " + voiceTick.noteValue + ":");
 			if(staffTick.ticksPos >= ticksPos && vtEndTick <= toTick){
-				console.log("Old voiceTick is inside gap: remove old!");
+				//console.log("Old voiceTick is inside gap: remove old!");
 				staffTick.voiceTicks[voiceNr] = undefined;
 				var empty = true;
 				for(var i = 0; i < staffTick.voiceTicks.length; i++){
@@ -1238,18 +1268,19 @@ Staff_Measure.prototype.createTimeGapInVoice = function(noteValue, dots, ticksPo
 				if(empty){ this.staffTicks.splice(staffTickIx, 1); }
 			}
 			else if(staffTick.ticksPos < ticksPos && vtEndTick >= ticksPos && vtEndTick <= toTick){
-				console.log("End only of old voiceTick is inside the gap: Shorten.");
+				//console.log("End only of old voiceTick is inside the gap: Shorten.");
 			}
 			else if(staffTick.ticksPos >= ticksPos && staffTick.ticksPos <= toTick && vtEndTick > toTick){
-				console.log("Beginning only of old vt is inside gap: move and shorten.");
+				//console.log("Beginning only of old vt is inside gap: move and shorten.:");
 				var noteRest;
 				for(var i = 0; i < voiceTick.noteRests.length; i++){
 					noteRest = voiceTick.noteRests[i];
-					this.addNoteRestTicksLength(noteRest.isNote, noteRest.noteNr, vtEndTick - toTick, toTick, voiceNr);
-					console.log("Addet med ticksLength: fra tick: " + toTick + 1);
+					//console.log(" Inserted a shortened noteRest, length: " + (vtEndTick - toTick) + "vtEndtick:" + vtEndTick + " toTick:" + toTick);
+					this.addNoteRestTicksLength(noteRest.isNote, noteRest.noteNr, vtEndTick - toTick, toTick + 1, voiceNr);
 				}
 				// Removing old voiceTick, and staffTick if empty:
 				staffTick.voiceTicks[voiceNr] = undefined;
+				//console.log("VoiceNR = " + voiceNr + " st.vTs(voiceNr)= " + staffTick.voiceTicks[voiceNr]);
 				var empty = true;
 				for(var i = 0; i < staffTick.voiceTicks.length; i++){
 					if(staffTick.voiceTicks[i] != undefined){ empty = false; break; }
@@ -1257,7 +1288,7 @@ Staff_Measure.prototype.createTimeGapInVoice = function(noteValue, dots, ticksPo
 				if(empty){ this.staffTicks.splice(staffTickIx, 1); }
 			}
 			else if(ticksPos > staffTick.ticksPos && toTick < vtEndTick){
-				console.log("Gap is inside old Vt: Shorten, copy/move/adjust length.");
+				//console.log("Gap is inside old Vt: Shorten, copy/move/adjust length.");
 			}
 
 		}
@@ -1306,7 +1337,7 @@ Staff_Measure.prototype.findGapsInVoices = function(){
 
 Staff_Measure.prototype.fillVoiceGapWithRest = function(voiceNr, ticksStart, ticksEndExclusive){
 	if(ticksStart == 0 && ticksEndExclusive == this.totalTicks){
-		this.addNoteRest(new NoteRest(false, 71), 99, 0, 0, 0);
+		this.addNoteRest(new NoteRest(false, 71), 99, 0, 0, 0, false);
 	}
 	else{
 		// Finn pauseverdier som tilsammen fyller gap.
@@ -1492,9 +1523,30 @@ Staff_Measure.prototype.render = function(leftX, topY, width, redraw){
 				for(var i = 0; i < voiceTick.dots; i++){
 					context.beginPath();
 					//alert("PosY = " + noteRest.Ypos);
+					var dotPosX;
 					var deltaDotPosY = spacingPx * 0.5;
 					if(noteRest.Ypos != Math.floor(noteRest.Ypos)){ deltaDotPosY = 0; }
-					var dotPosX = notePosX + itemImagesInfo[noteRest.imgNr].width * spacingPx + spacingPx * 0.5 * (i + 1);
+					if(noteRest.imgNr != undefined){
+						dotPosX = notePosX + itemImagesInfo[noteRest.imgNr].width *
+													itemImagesInfo[noteRest.imgNr].height * spacingPx +
+													spacingPx * 0.5 * (i + 1);
+					}
+					else{
+						if(!noteRest.isNote){
+							//Is a rest without an image file:
+							{
+								if(voiceTick.noteValue == 7 || voiceTick.noteValue == 8){
+									dotPosX = notePosX + spacingPx + spacingPx * 0.5 * (i + 1);
+								}
+								else if(voiceTick.noteValue == 6){
+									dotPosX = notePosX + spacingPx + spacingPx * 0.5 * (i + 1);
+								}
+								else if(voiceTick.noteValue < 6){
+									dotPosX = notePosX + spacingPx + spacingPx * 0.5 * (i + 1);
+								}
+							}
+						}
+					}
 					context.arc(dotPosX, notePosY + deltaDotPosY, spacingPx/6, 0, 2 * Math.PI);
 					context.fill();
 					context.stroke();
@@ -1558,7 +1610,7 @@ Staff_Measure.prototype.renderBeamsFlagsStems = function(){
 						rootNote = vt.noteRests[vt.noteRests.length - 1];
 						spanNote = vt.noteRests[0];
 						var rootInfo = itemImagesInfo[rootNote.imgNr];
-						console.log("stIx: " + stIx + "rootNote: " + rootNote.isNote + " noteNr: " + rootNote.noteNr + "ticksPos: " + staffTick.ticksPos);
+						//console.log("stIx: " + stIx + "rootNote: " + rootNote.isNote + " noteNr: " + rootNote.noteNr + "ticksPos: " + staffTick.ticksPos);
 						stemXpx = rootNote.XposPx + rootInfo.param1 * spacingPx;
 						stemYstartPx = rootNote.YposPx + rootInfo.param3 * spacingPx;
 
@@ -2076,9 +2128,23 @@ var StaffTick = function(ticksPos){
 }
 
 StaffTick.prototype.addNoteRest = function(noteRest, noteValue, dots, voiceNr){
-	if(this.voiceTicks[voiceNr] == undefined){ this.voiceTicks[voiceNr] = new VoiceTick(this, noteValue, dots); }
+	if(this.voiceTicks[voiceNr] == undefined){
+		var vt = new VoiceTick(this, noteValue, dots)
+		this.voiceTicks[voiceNr] = vt;
+	}
 	this.voiceTicks[voiceNr].addNoteRest(noteRest);
 };
+
+StaffTick.prototype.removeNoteRest = function(noteRest, voiceNr){
+	this.voiceTicks[voiceNr].removeNoteRest();
+	if(this.voiceTicks[voiceNr].noteRests.length == 0){
+		this.voiceTicks[voiceNr] = undefined;
+	}
+};
+
+
+
+
 
 // VoiceTick objects contains the noteRests of one voice at one tick position.
 // It is responsible for stem, beams/flag and articulation.
@@ -2105,6 +2171,15 @@ VoiceTick.prototype.addNoteRest = function(noteRest){
 				this.noteRests.splice(i, 0, noteRest);
 				break;
 			}
+		}
+	}
+};
+
+VoiceTick.prototype.removeNoteRest = function(noteRest){
+	for(var i = 0; i < this.noteRests.length; i++){
+		if(this.noteRests[i] == noteRest){
+			this.noteRests.splice(i, 1);
+			break;
 		}
 	}
 };
@@ -2137,12 +2212,12 @@ BeamGroup.prototype.buildBeams = function(){
 			readyForNew = false;
 			//alert("Starter ny beam bygging");
 		}
-		else if(!readyForNew && vtAtIx.noteValue < 6){
+		else if(!readyForNew && vtAtIx.noteValue < 6 && vtAtIx.noteRests[0].isNote){
 			lastVoiceTickIx = i;
 			if(vtAtIx.noteValue < valueShortestNote){ valueShortestNote = vtAtIx.noteValue; }
 			//alert("beambygg, lastNoteIx: " + lastVoiceTickIx);
 		}
-		if(vtAtIx.noteValue >= 6 || i == this.voiceTicks.length - 1){
+		if(vtAtIx.noteValue >= 6 || i == this.voiceTicks.length - 1 || !vtAtIx.noteRests[0].isNote){
 			//alert("nesten der, første, siste: " + firstVoiceTickIx + ", " + lastVoiceTickIx);
 			if(!readyForNew && lastVoiceTickIx > firstVoiceTickIx){
 				// We have a beam!
@@ -2153,26 +2228,24 @@ BeamGroup.prototype.buildBeams = function(){
 				}
 				this.beams.push(bm);
 
-				// LOOP her som gå gjennom alle sub verdier til shortest note og bygger sub beams: 16d, 32d til 256d
+				// Creating sub beams:
 				var subBeamFirstVoiceTickIx, subBeamLastVoiceTickIx;
-
-				for(var beamValue = 5; beamValue >= valueShortestNote; beamValue -= 1){
-					// Kopier inn rutinene over,tilpass til sub beams. ALLT skal beames, også enkeltnoter!
+				for(var beamValue = 4; beamValue >= valueShortestNote; beamValue -= 1){
 					readyForNew = true;
 					for(var i2 = bm.fromNoteIndex; i2 <= bm.toNoteIndex; i2++){
+
 						vtAtIx = this.voiceTicks[i2];
-						if(readyForNew && vtAtIx.noteValue < beamValue){
+						if(readyForNew && vtAtIx.noteValue <= beamValue){
 							subBeamFirstVoiceTickIx = i2;
 							subBeamLastVoiceTickIx = i2;
 							readyForNew = false;
 						}
-						else if(!readyForNew && vtAtIx.noteValue < beamValue){
+						else if(!readyForNew && vtAtIx.noteValue <= beamValue){
 							subBeamLastVoiceTickIx = i2;
 						}
-						if(vtAtIx.noteValue >= beamValue || i2 == this.voiceTicks.length - 1){
+						if(vtAtIx.noteValue > beamValue || i2 == bm.toNoteIndex){
 							if(!readyForNew){
-								//alert("Legger til sub beam verdi: " + (ticksBeamValue/2));
-								var subBm = new Beam(this, beamValue - 1, subBeamFirstVoiceTickIx, subBeamLastVoiceTickIx);
+								var subBm = new Beam(this, beamValue, subBeamFirstVoiceTickIx, subBeamLastVoiceTickIx);
 								subBm.mainBeam = bm;
 								if(subBm.fromNoteIndex == subBm.toNoteIndex){
 									// Is a "flag" type beam:
@@ -2297,14 +2370,17 @@ Beam.prototype.calcPositions = function(){
 var noteValueFromTicks = function(ticksLength){
 	var noteValue = Math.floor(Math.log2(ticksLength/Q_NOTE) + 6);
 	var remainder = ticksLength - this.ticksFromNoteValueDots(noteValue, 0);
-	//console.log("Remaining before dot:" + remainder + " remainder/noteTicsk=" + remainder / this.ticksFromNoteValueDots(noteValue, 0) );
+	//console.log("NOTE FROM TICKS: Remaining before dot:" + remainder + " remainder/noteTicsk=" + remainder / this.ticksFromNoteValueDots(noteValue, 0) );
 	var dots = 0;
 	if(remainder >= ticksLength / 4 && remainder < ticksLength){
-		var dots = -1 * Math.floor(Math.log2(1 - (remainder / this.ticksFromNoteValueDots(noteValue, 0))));
+		var dots = -1 * Math.ceil(Math.log2(1 - (remainder / this.ticksFromNoteValueDots(noteValue, 0))));
+		//console.log("NOTE FROM TICKS: dots calc: remaining: " + remainder + " / ticksFrom NoteV: " + this.ticksFromNoteValueDots(noteValue, 0));
 	}
+	if( dots > MAX_DOTS){ dots = MAX_DOTS; }
+
 	if( dots > 0){ remainder -= ticksFromNoteValueDots(noteValue - 1, dots -1); }
-	//console.log("noteV from Tx: " + ticksLength + " = " + "  noteValue: " + noteValue + "  dots: " + dots + "  r: " + remainder);
-	//console.log("ticks from noteValue and dots = " + ticksFromNoteValueDots(noteValue, dots));
+	//console.log("NOTE FROM TICKS: noteV from Tx:  = " + "  noteValue: " + noteValue + "  dots: " + dots + "  r: " + remainder);
+	//console.log("NOTE FROM TICKS: ticks from noteValue and dots = " + ticksFromNoteValueDots(noteValue, dots));
 	return { "noteValue": noteValue, "dots": dots, "remainder": remainder };
 };
 
@@ -2312,4 +2388,43 @@ var ticksFromNoteValueDots = function(noteValue, dots){
 	var ticks = Q_NOTE / Math.pow(2, 6 - noteValue);
 	ticks += ticks * (1 - Math.pow(2, 0 - dots));
 	return ticks;
+};
+
+
+// UNDO:
+
+// Undoing the last event:
+var undo = function(){
+	histEvent = historyStack.pop();
+	if(histEvent.action == "addNoteRest"){
+		console.log("Skal til å fjerne noteRest");
+		// Removes last added noteRest and sets cursor to the note position:
+		/*
+		var prevInputNoteNr = inputNoteNr;
+		inputNoteNr = inputOctaveOffset + noteNamesToNr[event.key];
+		if(inputNoteNr - prevInputNoteNr < -6){
+			inputNoteNr += 12;
+			inputOctaveOffset += 12;
+		}
+		else if(inputNoteNr - prevInputNoteNr > 6){
+			inputNoteNr -= 12;
+			inputOctaveOffset -= 12;
+		}
+		*/
+
+		/*
+		score.removeNoteRest(histEvent.object, histEvent.ticksPos, histEvent.measNr, histEvent.voiceNr);
+		score.updateMeasures(0, Q_NOTE * 100);
+		score.buildGraphic();
+
+		inputCurrentTicksPos += Q_NOTE / Math.pow(2, 6 - inputNoteValue);
+		if(inputCurrentTicksPos >= Q_NOTE * 4){
+			inputCurrentTicksPos = 0;
+			inputCurrentMeasNr += 1;
+		}
+		render(true);
+		*/
+	}
+
+
 };
